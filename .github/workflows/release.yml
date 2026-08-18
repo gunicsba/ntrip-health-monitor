@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate Python source
+        run: |
+          python -m py_compile ntrip_health_monitor.py
+
+      - name: Build release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME}"
+          BUNDLE_DIR="ntrip-health-monitor-${VERSION}"
+
+          mkdir -p "${BUNDLE_DIR}"
+          cp ntrip_health_monitor.py "${BUNDLE_DIR}/"
+          cp README.md "${BUNDLE_DIR}/"
+
+          if [ -f LICENSE ]; then
+            cp LICENSE "${BUNDLE_DIR}/"
+          fi
+
+          zip -r "${BUNDLE_DIR}.zip" "${BUNDLE_DIR}"
+
+          sha256sum ntrip_health_monitor.py "${BUNDLE_DIR}.zip" > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME}"
+          ZIP_FILE="ntrip-health-monitor-${VERSION}.zip"
+
+          gh release create "${VERSION}" \
+            --title "NTRIP RTCM Health Monitor ${VERSION}" \
+            --generate-notes \
+            ntrip_health_monitor.py \
+            "${ZIP_FILE}" \
+            SHA256SUMS.txt
