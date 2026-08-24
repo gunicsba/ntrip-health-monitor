@@ -1,13 +1,16 @@
-name: Release
+name: Release (test)
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Fake version tag to use for this test run, e.g. v0.0.0-test1"
+        required: true
+        default: "v0.0.0-test1"
 permissions:
   contents: write
 jobs:
   release:
-    name: Build and publish release
+    name: Build and publish TEST release
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -18,38 +21,36 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install --upgrade pyrtcm
-
       - name: Validate Python source
         run: |
           python -m py_compile ntrip_health_monitor.py
 
-      - name: Run NTRIP health check
-        env:
-          NTRIP_USERNAME: ${{ secrets.USER }}
-          NTRIP_PASSWORD: ${{ secrets.PASSWORD }}
+      - name: Fake a health report (no real NTRIP call)
+        shell: bash
         run: |
-          python ntrip_health_monitor.py \
-            --host "${{ secrets.HOST }}" \
-            --port "${{ secrets.PORT }}" \
-            --workers 5 \
-            --min-seconds 5 \
-            --max-seconds 20 \
-            --min-epochs 3
+          set -euo pipefail
+          mkdir -p runs/run_faketest
+          cat > runs/run_faketest/report.html <<'EOF'
+          <!doctype html>
+          <html>
+            <head><title>FAKE test report</title></head>
+            <body><h1>This is a placeholder report.html from the test workflow</h1></body>
+          </html>
+          EOF
 
       - name: Collect health report
         shell: bash
         run: |
           set -euo pipefail
+          VERSION="${{ github.event.inputs.version }}"
           REPORT_PATH="$(ls runs/run_*/report.html | tail -n1)"
-          cp "${REPORT_PATH}" "report-${GITHUB_REF_NAME}.html"
+          cp "${REPORT_PATH}" "report-${VERSION}.html"
 
       - name: Build release bundle
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME}"
+          VERSION="${{ github.event.inputs.version }}"
           BUNDLE_DIR="ntrip-health-monitor-${VERSION}"
           mkdir -p "${BUNDLE_DIR}"
           cp ntrip_health_monitor.py "${BUNDLE_DIR}/"
@@ -62,20 +63,30 @@ jobs:
           zip -r "${BUNDLE_DIR}.zip" "${BUNDLE_DIR}"
           sha256sum ntrip_health_monitor.py "${BUNDLE_DIR}.zip" "report-${VERSION}.html" > SHA256SUMS.txt
 
+      - name: List files about to be released
+        shell: bash
+        run: |
+          echo "----- Files that will be attached -----"
+          ls -la ntrip_health_monitor.py \
+            "ntrip-health-monitor-${{ github.event.inputs.version }}.zip" \
+            "report-${{ github.event.inputs.version }}.html" \
+            SHA256SUMS.txt
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME}"
+          VERSION="${{ github.event.inputs.version }}"
           ZIP_FILE="ntrip-health-monitor-${VERSION}.zip"
           if gh release view "${VERSION}" &>/dev/null; then
             gh release delete "${VERSION}" --yes
           fi
           gh release create "${VERSION}" \
-            --title "NTRIP RTCM Health Monitor ${VERSION}" \
-            --generate-notes \
+            --title "TEST release ${VERSION}" \
+            --notes "Test run of the release workflow — safe to delete." \
+            --prerelease \
             ntrip_health_monitor.py \
             "${ZIP_FILE}" \
             "report-${VERSION}.html" \
